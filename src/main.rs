@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 type Result<T> = result::Result<T,()>;
 
 // static SAFE_MODE: bool = false;
-static BAN_LIMIT: Duration = Duration::new(60* 10, 0);
+// static BAN_LIMIT: Duration = Duration::new(60* 10, 0);
 static MESSAGE_RATE_LIMIT: Duration = Duration::from_millis(500);
 // static MAX_STRIKES: u8 = 5;
 
@@ -93,26 +93,14 @@ fn server(messages: Receiver<Message>) -> Result <()> {
 
                 let ip = author_addr.ip();
                 let now = Instant::now();
-                let mut is_banned = false;
 
-                if let Some(banned_at) = banned_clients.get(&ip) {
-                    if now.duration_since(*banned_at) < BAN_LIMIT {
-                        println!("INFO: Rejecting banned client");
-                        // todo
-                    }else{
-                        println!("INFO: Ban expired");
-                        banned_clients.remove(&ip);
-                    }
-                }
-
-                if !is_banned {
-                    println!("INFO: Client accepted: {}", author_addr);
-                    clients.insert(author_addr, Client {
-                        conn: author_stream,
-                        last_message: now,
-                        strike_count: 0,
-                    });
-                }
+                println!("INFO: Client accepted: {}", author_addr);
+                clients.insert(author_addr, Client {
+                    conn: author_stream,
+                    last_message: now,
+                    strike_count: 0,
+                });
+                
             } // end client connected
 
             Message::ClientDisconnected(author_addr) => {
@@ -125,22 +113,23 @@ fn server(messages: Receiver<Message>) -> Result <()> {
                 let mut should_broadcast = true;
 
                 if let Some(author) = clients.get_mut(&author_addr) {
-                    let time_since_last = now.duration_since(author.last_message);
+                    // let time_since_last = now.duration_since(author.last_message);
+                    author.last_message = now;
+                    
+                    // if time_since_last < MESSAGE_RATE_LIMIT {
+                    //     author.strike_count = author.strike_count.saturating_add(1);
+                    //     println!("INFO: Banning client {} for spamming", author_addr);
+                    //     banned_clients.insert(author_addr.ip(), now);
 
-                    if time_since_last < MESSAGE_RATE_LIMIT {
-                        author.strike_count = author.strike_count.saturating_add(1);
-                        println!("INFO: Banning client {} for spamming", author_addr);
-                        banned_clients.insert(author_addr.ip(), now);
+                    //     let _ = (&*author.conn).write(b"You have been banned");
+                    //     let _ = author.conn.shutdown(std::net::Shutdown::Both);
 
-                        let _ = (&*author.conn).write(b"You have been banned");
-                        let _ = author.conn.shutdown(std::net::Shutdown::Both);
-
-                        clients.remove(&author_addr);
-                        continue;
-                    }else{
-                        author.last_message = now;
-                        author.strike_count = author.strike_count.saturating_sub(1);
-                    }
+                    //     clients.remove(&author_addr);
+                    //     continue;
+                    // }else{
+                        
+                    //     author.strike_count = author.strike_count.saturating_sub(1);
+                    // }
                 } else {
                     eprintln!("WARN: Message from unknown client {}", author_addr);
                     should_broadcast = false;

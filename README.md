@@ -41,10 +41,27 @@ git commit -m "commit message"
 git push
 ```
 
-## To-do
-- Thread-per-client model won't scale
+Creating a branch
+```bash
+git switch -c my-feature
+```
+
+Working on a branch:
+```bash
+git add. 
+git commit -m "commit message"
+git push -u origin my-feature
+git push
+```
+Switching between branches
+```bash
+git switch main
+```
+
+## To-do 
 - Storage for chats (save/load)
 - Better way to quit/leave chat
 - UI
 - Script to quickstart and stop the server
-- CCTV
+- CCTV 
+- Thread-per-client model won't scale

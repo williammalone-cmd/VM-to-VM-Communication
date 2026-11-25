@@ -8,7 +8,6 @@ use std::thread;
 use std::sync::{mpsc, Arc}; // Arc for sharing! Mpsc for messages!
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
-
 type Result<T> = result::Result<T,()>;
 
 #[derive(Debug)]
@@ -21,7 +20,6 @@ enum Message {
 struct Client {
     conn:Arc<TcpStream>,
     last_message: Instant,
-    strike_count: u8,
 }
 
 fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
@@ -48,10 +46,10 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
                 break;
             }
             Ok(n) => {
-                let data = buffer[0..n].to_vec();
-                messages.send(Message::NewMessage(addr, data)).map_err(|err| {
-                    eprintln!("ERROR: could not send NewMessage: {}", err);
-                })?;
+                let data = buffer[0..n].to_vec(); // waits for bytes from telnet
+                messages.send(Message::NewMessage(addr, data))
+                    .map_err(|err| {eprintln!("ERROR: could not send NewMessage: {}", err);
+                    })?;
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
                 continue;
@@ -68,7 +66,12 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
 
 fn server(messages: Receiver<Message>) -> Result <()> {
     let mut clients: HashMap<SocketAddr, Client> = HashMap::new();
-    let mut banned_clients: HashMap<IpAddr, Instant> = HashMap::new();
+    
+    let mut resolver: HashMap<String, String> = HashMap::new();
+    resolver.insert("172.16.10.185".to_string(), "William".to_string());
+    resolver.insert("172.16.10.194".to_string(), "Crystal".to_string());
+    resolver.insert("172.16.10.192".to_string(), "Suhani".to_string());
+
 
     println!("INFO: Server thread started.");
 
@@ -88,26 +91,13 @@ fn server(messages: Receiver<Message>) -> Result <()> {
 
                 let ip = author_addr.ip();
                 let now = Instant::now();
-                let mut is_banned = false;
 
-                if let Some(banned_at) = banned_clients.get(&ip) {
-                    if now.duration_since(*banned_at) < BAN_LIMIT {
-                        println!("INFO: Rejecting banned client");
-                        // todo
-                    }else{
-                        println!("INFO: Ban expired");
-                        banned_clients.remove(&ip);
-                    }
-                }
-
-                if !is_banned {
-                    println!("INFO: Client accepted: {}", author_addr);
-                    clients.insert(author_addr, Client {
-                        conn: author_stream,
-                        last_message: now,
-                        strike_count: 0,
-                    });
-                }
+                println!("INFO: Client accepted: {}", author_addr);
+                clients.insert(author_addr, Client {
+                    conn: author_stream,
+                    last_message: now,
+                });
+                
             } // end client connected
 
             Message::ClientDisconnected(author_addr) => {
@@ -120,32 +110,29 @@ fn server(messages: Receiver<Message>) -> Result <()> {
                 let mut should_broadcast = true;
 
                 if let Some(author) = clients.get_mut(&author_addr) {
-                    let time_since_last = now.duration_since(author.last_message);
-
-                    if time_since_last < MESSAGE_RATE_LIMIT {
-                        author.strike_count = author.strike_count.saturating_add(1);
-                        println!("INFO: Banning client {} for spamming", author_addr);
-                        banned_clients.insert(author_addr.ip(), now);
-
-                        let _ = (&*author.conn).write(b"You have been banned");
-                        let _ = author.conn.shutdown(std::net::Shutdown::Both);
-
-                        clients.remove(&author_addr);
-                        continue;
-                    }else{
-                        author.last_message = now;
-                        author.strike_count = author.strike_count.saturating_sub(1);
-                    }
+                    author.last_message = now;
                 } else {
                     eprintln!("WARN: Message from unknown client {}", author_addr);
                     should_broadcast = false;
-                }
+                }   
 
                 if should_broadcast {
                     for (recipient_addr, recipient) in clients.iter(){
+
+                        let text = String::from_utf8_lossy(&bytes);
+                        let mut line = format!("[{}]: {}", author_addr, text); // unused
+
+                        match resolver.get(&author_addr.ip().to_string()) {
+                            Some(name) => {
+                                line = format!("[{}]: {}", name, text);
+                            }
+                            None => {
+                                line = format!("[Unknown User]: {}", text);
+                            }
+                        }
                         if *recipient_addr != author_addr {
-                            let _= (&*recipient.conn).write(&bytes).map_err(|err| {
-                                eprintln!("ERROR: Failed write to {}: {}", recipient_addr, err);
+                            let _= (&*recipient.conn).write_all(line.as_bytes())
+                                .map_err(|err| {eprintln!("ERROR: Failed write to {}: {}", recipient_addr, err);
                             });
                         }
                     }

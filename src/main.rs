@@ -1,42 +1,5 @@
 // VM-to-VM-Communication
 
-//  To open port 
-//      firewall-cmd --add-port=4567/tcp
-
-//  To close port
-//      firewall-cmd --remove-port=4567/tcp
-
-// To install git
-//      sudo dnf install -y git
-
-// To install telnet
-//      sudo dnf install telnet
-
-
-// To Connect
-//      telnet 172.16.10.194 4567
-
-// Git stuff
-/*
-cd /home/william-test/chat-app
-git pull
-*/
-
-/*
-git add .
-git commit -m "commit message"
-git push
-*/
- 
-// ToDo: 
-//  Thread per client model wont scale
-//  Storage for chats. save/load
-//  Better way to quit/leave chat
-//  UI
-//  Script to quickstart and stop the server
-//  CCTV
-
-
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::result;

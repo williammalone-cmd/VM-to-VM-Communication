@@ -46,7 +46,7 @@ Creating a branch
 git switch -c my-feature
 ```
 
-Working on a branch:
+Working on a branch:s
 ```bash
 git add. 
 git commit -m "commit message"
@@ -62,6 +62,8 @@ git switch main
 - Storage for chats (save/load)
 - Better way to quit/leave chat
 - UI
+- Client to replace telnet
 - Script to quickstart and stop the server
 - CCTV 
 - Thread-per-client model won't scale
+

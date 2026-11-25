@@ -11,11 +11,6 @@ use std::time::{Duration, Instant};
 
 type Result<T> = result::Result<T,()>;
 
-// static SAFE_MODE: bool = false;
-static BAN_LIMIT: Duration = Duration::new(60* 10, 0);
-static MESSAGE_RATE_LIMIT: Duration = Duration::from_millis(500);
-// static MAX_STRIKES: u8 = 5;
-
 #[derive(Debug)]
 enum Message {
     ClientConnected(Arc<TcpStream>),

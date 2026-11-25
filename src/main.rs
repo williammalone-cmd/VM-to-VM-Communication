@@ -13,6 +13,9 @@
 //      sudo dnf install telnet
 
 
+// To Connect
+//      telnet 172.16.10.194 4567
+
 // ToDo: 
 //  Thread per client model wont scale
 //  Storage for chats. save/load

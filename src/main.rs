@@ -16,6 +16,18 @@
 // To Connect
 //      telnet 172.16.10.194 4567
 
+// Git stuff
+/*
+cd /home/william-test/chat-app
+git pull
+*/
+
+/*
+git add .
+git commit -m "commit message"
+git push
+*/
+ 
 // ToDo: 
 //  Thread per client model wont scale
 //  Storage for chats. save/load

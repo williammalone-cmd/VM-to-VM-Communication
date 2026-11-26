@@ -1,180 +1,108 @@
 // VM-to-VM-Communication
 
+use tokio::net::TcpListener;
+use tokio::sync::broadcast;
+use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::Message;
+use futures_util::{SinkExt, StreamExt};
+use std::process::Command;
+use std::net::SocketAddr;
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
-use std::result;
-use std::io::{self, Write, Read};
-use std::thread;
-use std::sync::{mpsc, Arc}; // Arc for sharing! Mpsc for messages!
-use std::sync::mpsc::{Receiver, Sender};
-use std::time::{Duration, Instant};
-type Result<T> = result::Result<T,()>;
+use std::sync::Arc;
 
-#[derive(Debug)]
-enum Message {
-    ClientConnected(Arc<TcpStream>),
-    ClientDisconnected(SocketAddr),
-    NewMessage(SocketAddr, Vec<u8>),
+const PORT: u16 = 4567;
+const ADDRESS: &str = "0.0.0.0"; //Listen on every network on this machine
+
+#[derive(Clone, Debug)]
+struct ChatMsg {
+    from: SocketAddr,
+    text: String,
 }
 
-struct Client {
-    conn:Arc<TcpStream>,
-    last_message: Instant,
-}
-
-fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
-    let addr = match stream.peer_addr() {
-        Ok(addr) => addr,
-        Err(_) => {
-            eprintln!("ERROR: Client connected but couldnt get address. Dropping ");
-            return Err(());
-        }
-    };
-
-    messages.send(Message::ClientConnected(stream.clone())).map_err(|err|{
-        eprintln!("ERROR: Could not send ClientConnected: {}", err);
-    })?;
-
-    println!("INFO: Client thread started for {}", addr);
-    let mut buffer = vec![0; 1024];
-
-    loop {
-        match (&*stream).read(&mut buffer){
-            Ok(0) => {
-                println!("INFO: Client {} disconnected gracefully", addr);
-                messages.send(Message::ClientDisconnected(addr)).map_err(|_|{})?;
-                break;
-            }
-            Ok(n) => {
-                let data = buffer[0..n].to_vec(); // waits for bytes from telnet
-                messages.send(Message::NewMessage(addr, data))
-                    .map_err(|err| {eprintln!("ERROR: could not send NewMessage: {}", err);
-                    })?;
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
-                continue;
-            }
-            Err(err) => {
-                eprintln!("ERROR: reading from client {}: {}", addr, err);
-                messages.send(Message::ClientDisconnected(addr)).map_err(|_|{})?;
-                return Err(());
-            }
-        }
+fn firewall(action: &str, port: u16){
+    let arg = format!("--{}-port={}/tcp", action, port);
+    match Command::new("firewall-cmd").arg(&arg).status(){
+        Ok(s) if s.success() => eprintln!("INFO: Opened port {}", port),
+        Ok(s) => eprintln!("ERROR: firewall failed {}", s),
+        Err(e) => eprintln!("ERROR: could not run firewall cmd: {}", e),
     }
-    Ok(())
 }
 
-fn server(messages: Receiver<Message>) -> Result <()> {
-    let mut clients: HashMap<SocketAddr, Client> = HashMap::new();
-    
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut resolver: HashMap<String, String> = HashMap::new();
-    resolver.insert("172.16.10.185".to_string(), "William".to_string());
+    resolver.insert("172.16.10.185".to_string(), "William".to_string()); 
     resolver.insert("172.16.10.194".to_string(), "Crystal".to_string());
     resolver.insert("172.16.10.192".to_string(), "Suhani".to_string());
+    let resolver = Arc::new(resolver);
 
+    let listener = TcpListener::bind((ADDRESS, PORT)).await?;
+    let (tx, _) = broadcast::channel::<ChatMsg>(256);
+    firewall("add", PORT);
+    eprintln!("INFO: Listening on {}:{}\n", ADDRESS, PORT);
 
-    println!("INFO: Server thread started.");
-
-    loop {
-        let msg = messages.recv().expect("ERROR: Message channel broken!");
-
-        match msg {
-            Message::ClientConnected(author_stream)=>{
-                let author_addr = match author_stream.peer_addr() {
-                    Ok(addr) => addr,
-                    Err(_) => {
-                        eprintln!("ERROR: Server received ClientConnected but couldnt get address");
-                        let _ = author_stream.shutdown(std::net::Shutdown::Both);
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            eprintln!("\nINFO: Shutting down...");
+        }
+        _ = async {
+            loop {
+                let (stream, addr) = match listener.accept().await{
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        eprintln!("accept failed: {}", e);
                         continue;
                     }
                 };
+                let tx = tx.clone(); 
+                let resolver = resolver.clone();
+                let mut rx = tx.subscribe();
 
-                let ip = author_addr.ip();
-                let now = Instant::now();
+                tokio::spawn(async move {
+                    let Ok(ws) = accept_async(stream).await else{
+                        eprintln!("{addr}: handshake failed");
+                        return;
+                    };
+                    let (mut sink, mut source) = ws.split();
+                    
+                    let name = match resolver.get(&addr.ip().to_string())  {
+                        Some(n) => n.clone(),
+                        None => "Unknown User".to_string()
+                    };
 
-                println!("INFO: Client accepted: {}", author_addr);
-                clients.insert(author_addr, Client {
-                    conn: author_stream,
-                    last_message: now,
-                });
-                
-            } // end client connected
-
-            Message::ClientDisconnected(author_addr) => {
-                println!("INFO: Client Disconnected: {}", author_addr);
-                clients.remove(&author_addr);
-            }
-
-            Message::NewMessage(author_addr, bytes) => {
-                let now = Instant::now();
-                let mut should_broadcast = true;
-
-                if let Some(author) = clients.get_mut(&author_addr) {
-                    author.last_message = now;
-                } else {
-                    eprintln!("WARN: Message from unknown client {}", author_addr);
-                    should_broadcast = false;
-                }   
-
-                if should_broadcast {
-                    for (recipient_addr, recipient) in clients.iter(){
-
-                        let text = String::from_utf8_lossy(&bytes);
-                        let mut line = format!("[{}]: {}", author_addr, text); // unused
-
-                        match resolver.get(&author_addr.ip().to_string()) {
-                            Some(name) => {
-                                line = format!("[{}]: {}", name, text);
+                    // Write loop
+                    let write = tokio::spawn(async move {
+                        while let Ok(msg) = rx.recv().await{
+                            if msg.from == addr {
+                                continue; // dont echo
                             }
-                            None => {
-                                line = format!("[Unknown User]: {}", text);
+
+                            let line = format!("[{}]: {}", name, msg.text);
+                            if sink.send(Message::text(line)).await.is_err(){
+                                break;
                             }
                         }
-                        if *recipient_addr != author_addr {
-                            let _= (&*recipient.conn).write_all(line.as_bytes())
-                                .map_err(|err| {eprintln!("ERROR: Failed write to {}: {}", recipient_addr, err);
-                            });
+                    });
+
+                    // Read Loop
+                    while let Some(Ok(msg)) = source.next().await {
+                        if let Message::Text(text) = msg {
+                            // println!("text: {:?}", addr.to_string());
+                            let packet = ChatMsg {
+                                from: addr,
+                                text: text.to_string(),
+                            };
+                            let _ = tx.send(packet);
                         }
                     }
-                }
-            }
-        }
-    }
-}
 
-fn main() -> Result<()> {
-    let address = "0.0.0.0:4567";
-    let listener = TcpListener::bind(address)
-        .map_err(|err|{eprintln!("ERROR: could not bind {}: {}", address, err);})?;
-    println!("INFO: Listening on address: {}", address);
-    
-    let (sender, receiver) = mpsc::channel::<Message>();
-
-    thread::spawn(|| server(receiver));
-
-    for stream_result in listener.incoming() {
-        match stream_result{
-            Ok(stream) => {
-                // println!("INFO: Incoming connection!");
-                if let Err(e) = stream.set_read_timeout(Some(Duration::new(5, 0))) {
-                    eprintln!("WARN: Failed to set read timeout: {}", e);
-                }
-
-                let message_sender = sender.clone();
-
-                let stream_arc = Arc::new(stream);
-
-                thread::spawn(move || {
-                    if let Err(_) = client(stream_arc, message_sender){
-
-                    }
+                    write.abort();
+                    eprintln!("INFO: {addr} disconnected");
                 });
             }
-            Err(e) => {
-                eprintln!("ERROR: could not accept stream: {}", e);
-            }
-        }
+        } => {}
     }
-    
+
+    firewall("remove", PORT);
     Ok(())
 }

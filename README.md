@@ -21,41 +21,14 @@ Close the port:
 firewall-cmd --remove-port=4567/tcp
 ```
 
-## Connecting
+## Connecting with WebSocket (New)
+```bash
+cargo run --bin chat-client
+```
+
+## Connecting with TCP (old)
 ```bash
 telnet 172.16.10.194 4567
-```
-
-## Git workflow
-
-Before starting work:
-```bash
-cd /home/william-test/chat-app
-git pull
-```
-
-After making changes:
-```bash
-git add .
-git commit -m "commit message"
-git push
-```
-
-Creating a branch
-```bash
-git switch -c my-feature
-```
-
-Working on a branch:s
-```bash
-git add. 
-git commit -m "commit message"
-git push -u origin my-feature
-git push
-```
-Switching between branches
-```bash
-git switch main
 ```
 
 ## To-do 
